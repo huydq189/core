@@ -1,0 +1,72 @@
+image: node:16-alpine
+variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ''
+    IMAGE_VERSION: $CI_COMMIT_TAG
+    NPM_TOKEN: $NPM_TOKEN
+services:
+    - docker:20.10.5-dind
+stages:
+    - versioning
+    - auditing
+    - compiling
+    - publishing
+versioning:
+    stage: versioning
+    only:
+        - tags
+    when: always
+    before_script:
+        - npm -v
+    script:
+        - npm version $CI_COMMIT_TAG --commit-hooks=false --git-tag-version=false
+        - mkdir source
+        - cp -f package.json source
+    artifacts:
+        paths:
+            - source
+        expire_in: 10 minutes
+auditing:
+    stage: auditing
+    only:
+        - tags
+    when: on_success
+    before_script:
+        - ls
+        - cp -f source/package.json .
+        - npm i --package-lock-only
+    script:
+        - npm audit --fix --production
+
+compiling:
+    stage: compiling
+    only:
+        - tags
+    when: on_success
+    before_script:
+        - cp -f source/package.json .
+        - npm install
+    script:
+        - npm run package
+    artifacts:
+        paths:
+            - ./module
+        expire_in: 10 minutes
+publishing:
+    stage: publishing
+    only:
+        - tags
+    variables:
+        REGISTRY_TAG: $REGISTRY_TAG
+        IMAGE_VERSION: $CI_COMMIT_TAG
+        NPM_TOKEN: $NPM_TOKEN
+    when: on_success
+    before_script:
+        - cd ./module
+        - echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" > .npmrc
+        - cat .npmrc
+        - >
+            rc="-"; case "$CI_COMMIT_TAG" in *$rc* ) echo "npm publish --access restricted --tag alpha" > command ;; *) echo "npm publish --access restricted" > command ;; esac
+
+    script:
+        - sh command
